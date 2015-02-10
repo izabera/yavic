@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+# yavic - Yet Another VI Clone (written in bash)
+# this code is free software, distributed under the GPLv3
+
+unset filename
+
+case $# in
+  1) filename=$1;;
+  *) echo "Usage: yavic [file]" >&2; exit 1;;
+esac
+
+if [[ $filename ]]; then
+  if [[ -r $filename ]]; then
+    mapfile -t file < "$filename"
+  else
+    echo "Cannot open file $filename" >&2;
+    exit 1
+  fi
+fi
+
+shopt -s checkwinsize
+stty -echo
+trap render SIGWINCH
+trap 'error "Type :q to quit"' SIGINT
+trap cleanup EXIT
+tput smcup
+
+
+
+# {curr,old}pos{x,y}           -> screen position
+# {curr,old}{line,column}      -> file position
+currposx=0 currposy=0 currline=0 currcolumn=0
+
+
+
+
+ex_save () {
+  if [[ $1 ]]; then filename=$1; fi
+  if [[ $filename ]]; then
+    if [[ -w $filename ]]; then
+      printf '%s\n' "${file[@]}" > "$filename"
+    else
+      error 'Cannot write to read-only file'
+    fi
+  else
+    error 'No current filename'
+  fi
+}
+
+ex_read () {
+}
+
+ex_quit () {
+}
+
+vi_h () {
+  ((currcolumn > 0)) && ((currcolumn--))
+}
+
+vi_j () {
+  [[ -v file[currline+1] ]] && ((currline++))
+}
+
+vi_k () {
+  ((currline > 0)) && ((currline--))
+}
+
+vi_l () {
+  (( ${#file[currline]} > currcolumn )) && ((currcolumn++))
+}
+
+vi_J () {
+  if [[ -v file[currline+1] ]]; then
+    file[currline]+=" ${file[currline+1]}"
+    unset file[currline+1]
+    file=("${file[@]}")
+  fi
+}
+
+cleanrow () {
+  tput cup "$1" 0
+  for ((i=0; i<COLUMNS; i++)) { printf ' '; }
+}
+
+error () {
+  cleanrow "$((LINES-1))"
+  if [[ $1 ]]; then
+    tput cup "$((LINES-1))" 0
+    printf '%s\n' "$1"
+  fi
+}
+
+cleanup () {
+  stty echo
+  tput rmcup
+}
+
+render () {
+  for ((i = 0; i < LINES-1; i++)) do screen[i]="~"; done
+  screen[i]=
+  tput clear
+  tput setaf
+  tput cup "$currposx" "$currposy"
+}
+
+isvalidex () {
+}
+
+exmode () {
+}
+
+commandmode () {
+  # this sucks for a number of reasons
+  tput cup "$((LINES-1))" 0
+  printf :
+  stty echo
+  read -r
+  stty -echo
+  exmode "$REPLY"
+}
+
+isvalidvisual () {
+  [[ $1 = : ]] && return true
+  visualcmds=(a A b B)
+  case ${1#+([0-9])} in
+    [wWeErRYuUiIoOpPaAsSDGhHjJkKlLxXCvVbBnNmM]) true;;
+    #[hHjJkKlLwWeEDYCaAG.]) true;;
+    #[fFtTdycg]) isvalidvisual "${1#+([0-9])?}";;
+    *) false;;
+  esac
+}
+
+executevisual () {
+  if [[ $1 = : ]]; then cmd=; commandmode
+  else :
+  fi
+}
+
+visualmode () {
+  if isvalidvisual "$1"; then
+    executevisual "$1"
+    cmd=
+  fi
+}
+
+# redraw screen after each character until i find a better way
+insertmode () {
+  while read -rsn1; do
+    if [[ $REPLY = $'\e' ]]; then break; fi
+
+  done
+}
+
+# basic loop to get the commands
+normalmode () {
+  cmd=
+  while read -rsn1; do
+    case $REPLY in
+      $'\e') cmd=;;
+      *) cmd+=$REPLY; visualmode "$cmd";;
+    esac
+  done
+}
+
+while :; do render; normalmode; done
