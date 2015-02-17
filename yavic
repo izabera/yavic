@@ -6,6 +6,7 @@
 unset filename
 
 case $# in
+  0) ;;
   1) filename=$1;;
   *) echo "Usage: yavic [file]" >&2; exit 1;;
 esac
@@ -34,12 +35,27 @@ currposx=0 currposy=0 currline=0 currcolumn=0
 
 
 
+ex.r () {
+}
 
-ex_save () {
+ex.q () {
+  if "$edited"; then
+    error "No write since last change (add ! to override)"
+  else
+    exit
+  fi
+}
+
+ex.q! () {
+  exit 0
+}
+
+ex.w () {
   if [[ $1 ]]; then filename=$1; fi
   if [[ $filename ]]; then
     if [[ -w $filename ]]; then
       printf '%s\n' "${file[@]}" > "$filename"
+      edited=false
     else
       error 'Cannot write to read-only file'
     fi
@@ -48,35 +64,74 @@ ex_save () {
   fi
 }
 
-ex_read () {
+ex.s () {
+  # $1 pattern $2 replacement $3 modifier
+  
 }
 
-ex_quit () {
-}
 
-vi_h () {
+
+# list of things i have no idea how to do:
+# - render tabs (display them as wide as spaces for now)
+# - get backspace/delete/arrows in a portable way (maybe with readline?)
+# - actually benefit from readline
+
+
+vi.h () {
   ((currcolumn > 0)) && ((currcolumn--))
 }
 
-vi_j () {
+vi.j () {
   [[ -v file[currline+1] ]] && ((currline++))
 }
 
-vi_k () {
+vi.k () {
   ((currline > 0)) && ((currline--))
 }
 
-vi_l () {
+vi.l () {
   (( ${#file[currline]} > currcolumn )) && ((currcolumn++))
 }
 
-vi_J () {
+vi.J () {
   if [[ -v file[currline+1] ]]; then
     file[currline]+=" ${file[currline+1]}"
     unset file[currline+1]
     file=("${file[@]}")
   fi
 }
+
+vi.I () {
+  currcolumn=0
+  insertmode
+}
+
+vi.A () {
+  currcolumn=${#file[currline]}
+  insertmode
+}
+
+vi.O () {
+  file=("${file[@]:0:currline}" "" "${file[@]:currline}")
+  insertmode
+}
+
+vi.o () {
+  ((currline ++))
+  vi.O
+}
+
+vi.^ () {
+  temp=${file[currline]%%[![:space:]]*}
+  currcolum=${#temp}
+}
+
+vi.dollar () {
+  currcolumn=${#file[currline]}
+}
+
+
+
 
 cleanrow () {
   tput cup "$1" 0
@@ -100,7 +155,6 @@ render () {
   for ((i = 0; i < LINES-1; i++)) do screen[i]="~"; done
   screen[i]=
   tput clear
-  tput setaf
   tput cup "$currposx" "$currposy"
 }
 
@@ -108,6 +162,11 @@ isvalidex () {
 }
 
 exmode () {
+  if isvalidex "$1"; then
+    executeex "$1"
+  else
+    error "Invalid command"
+  fi
 }
 
 commandmode () {
@@ -133,7 +192,7 @@ isvalidvisual () {
 
 executevisual () {
   if [[ $1 = : ]]; then cmd=; commandmode
-  else :
+  else : todo
   fi
 }
 
@@ -146,16 +205,16 @@ visualmode () {
 
 # redraw screen after each character until i find a better way
 insertmode () {
-  while read -rsn1; do
+  render
+  while read -rn1; do
     if [[ $REPLY = $'\e' ]]; then break; fi
-
   done
 }
 
 # basic loop to get the commands
 normalmode () {
   cmd=
-  while read -rsn1; do
+  while read -rn1; do
     case $REPLY in
       $'\e') cmd=;;
       *) cmd+=$REPLY; visualmode "$cmd";;
